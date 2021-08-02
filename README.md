@@ -2,6 +2,10 @@
 
 This repository contains the code for the "cuTS: Scaling Subgraph Isomorphism on Distributed Multi-GPU Systems Using Trie Based Data Structure" framework. The cuTS framework is an efficient subgraph isomorphism solver for GPUs. 
 
+## Obtaining latest version of the software
+
+Visit https://github.com/appl-lab/CuTS for obtaining latest of this software. 
+
 ## Package requirements:
 * cmake(>=3.10)
 * OpenMP
