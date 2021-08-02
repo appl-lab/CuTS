@@ -24,7 +24,7 @@ See examples in dataset/query/ours_format (first line is the number of vertices 
 ### Software requirements for downloading script:
 * gunzip
 * wget
-* python
+* python3
     
 ## Single node experiments:
 For single node expriment, the machine should have at least`300GB` memory. If the machine doesn't have that much memory, cuts still be able to run some experiment 
