@@ -299,60 +299,68 @@ unsigned long long int search_mpi(string query_file,string data_file,int world_s
     }
     chkerr(cudaMemcpy(cans_array,s_pointers.results_table,ini_count*sizeof(unsigned int),cudaMemcpyDeviceToHost));
     shuffle_array(cans_array,ini_count);
-    chkerr(cudaMemcpy(s_pointers.results_table,cans_array,ini_count*sizeof(unsigned int),cudaMemcpyHostToDevice));
     bool helpOthers = false;
     cudaMemset(s_pointers.lengths,0,(iters+1)*sizeof(unsigned int));
-    s_pointers.lengths[1] = ini_count;
-    s_pointers.lengths[0] = 0;
-    chkerr(cudaMemcpy(s_pointers.results_table,cans_array,s_pointers.lengths[1]*sizeof(unsigned int),
-                      cudaMemcpyHostToDevice));
-    iter = 1;
-    do {
-        int taker;
-        bool divided_work;
-        if (helpOthers && iter < iters) {
-            cudaMemset(s_pointers.lengths,0,(iters+1)*sizeof(unsigned int));
-            iter = decode_com_buffer(mpiCommBuffer,s_pointers);
+    unsigned int trunk_size = 512;
+    unsigned int num_trunks = (ini_count - 1)/trunk_size + 1;
+    for(unsigned int l=0;l<num_trunks;++l){
+        iter = 1;
+        unsigned int t_size = trunk_size;
+        if(l == num_trunks - 1){
+            t_size = ini_count - l*trunk_size;
         }
-        for (;iter < iters; ++iter) {
-            s_pointers.lengths[iter+1] = s_pointers.lengths[iter];
-            cudaMemset(global_count,0,sizeof(unsigned int));
-            unsigned int preCandidates = s_pointers.lengths[iter] - s_pointers.lengths[iter-1];
-            if(preCandidates > 10000){
-                unsigned int miniBatchSize = preCandidates / 3;
-                cudaMemset(global_count,0,1*sizeof(unsigned int));
-                kernel_launch(query_pointers,data_pointers,c_pointers,
-                              s_pointers,data_graph.V,iter,miniBatchSize,
-                              0,global_count,data_graph.AVG_DEGREE);
-                chkerr(cudaDeviceSynchronize());
-                encode_com_buffer(mpiCommBuffer,s_pointers,iter,miniBatchSize);
-                divided_work = give_work_wrapper(grank, taker, mpiCommBuffer);
-                cudaMemset(global_count,0,1*sizeof(unsigned int));
-                kernel_launch(query_pointers,data_pointers,c_pointers,
-                              s_pointers,data_graph.V,iter,
-                              preCandidates-2*miniBatchSize,
-                              2*miniBatchSize,global_count,data_graph.AVG_DEGREE);
-                chkerr(cudaDeviceSynchronize());
-                if(!divided_work){
+        cudaMemset(s_pointers.lengths,0,(iters+1)*sizeof(unsigned int));
+        s_pointers.lengths[1] = t_size;
+        chkerr(cudaMemcpy(s_pointers.results_table,&cans_array[l*trunk_size],
+                          t_size*sizeof(unsigned int),cudaMemcpyHostToDevice));
+        helpOthers = false;
+        do {
+            int taker;
+            bool divided_work;
+            if (helpOthers && iter < iters) {
+                cudaMemset(s_pointers.lengths,0,(iters+1)*sizeof(unsigned int));
+                iter = decode_com_buffer(mpiCommBuffer,s_pointers);
+            }
+            for (;iter < iters; ++iter) {
+                s_pointers.lengths[iter+1] = s_pointers.lengths[iter];
+                cudaMemset(global_count,0,sizeof(unsigned int));
+                unsigned int preCandidates = s_pointers.lengths[iter] - s_pointers.lengths[iter-1];
+                if(preCandidates > 100000){
+                    unsigned int miniBatchSize = preCandidates / 3;
                     cudaMemset(global_count,0,1*sizeof(unsigned int));
-                    kernel_launch(query_pointers,data_pointers,c_pointers,s_pointers,data_graph.V,iter,
-                                  miniBatchSize,miniBatchSize,global_count,data_graph.AVG_DEGREE);
+                    kernel_launch(query_pointers,data_pointers,c_pointers,
+                                  s_pointers,data_graph.V,iter,miniBatchSize,
+                                  0,global_count,data_graph.AVG_DEGREE);
+                    chkerr(cudaDeviceSynchronize());
+                    encode_com_buffer(mpiCommBuffer,s_pointers,iter,miniBatchSize);
+                    divided_work = give_work_wrapper(grank, taker, mpiCommBuffer);
+                    cudaMemset(global_count,0,1*sizeof(unsigned int));
+                    kernel_launch(query_pointers,data_pointers,c_pointers,
+                                  s_pointers,data_graph.V,iter,
+                                  preCandidates-2*miniBatchSize,
+                                  2*miniBatchSize,global_count,data_graph.AVG_DEGREE);
+                    chkerr(cudaDeviceSynchronize());
+                    if(!divided_work){
+                        cudaMemset(global_count,0,1*sizeof(unsigned int));
+                        kernel_launch(query_pointers,data_pointers,c_pointers,s_pointers,data_graph.V,iter,
+                                      miniBatchSize,miniBatchSize,global_count,data_graph.AVG_DEGREE);
+                    }
+                }else{
+                    cudaMemset(global_count,0,1*sizeof(unsigned int));
+                    kernel_launch(query_pointers,data_pointers,c_pointers,
+                                  s_pointers,data_graph.V,iter,preCandidates,
+                                  0,global_count,data_graph.AVG_DEGREE);
                 }
-            }else{
-                cudaMemset(global_count,0,1*sizeof(unsigned int));
-                kernel_launch(query_pointers,data_pointers,c_pointers,
-                              s_pointers,data_graph.V,iter,preCandidates,
-                              0,global_count,data_graph.AVG_DEGREE);
+                chkerr(cudaDeviceSynchronize());
+                results_count = s_pointers.lengths[iter+1] - s_pointers.lengths[iter];
+                if (results_count == 0) {
+                    iter = iters;
+                    break;
+                }
             }
-            chkerr(cudaDeviceSynchronize());
-            results_count = s_pointers.lengths[iter+1] - s_pointers.lengths[iter];
-            if (results_count == 0) {
-                iter = iters;
-                break;
-            }
-        }
-        helpOthers = true;
-    } while (wsize != take_work_wrap(rank, mpiCommBuffer));
+            helpOthers = true;
+        } while (wsize != take_work_wrap(rank, mpiCommBuffer));
+    }
     cudaEventRecord(event_stop);
     cudaEventSynchronize(event_stop);
     float time_milli_sec = 0;
