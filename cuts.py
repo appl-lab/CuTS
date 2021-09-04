@@ -8,8 +8,6 @@ if __name__ == '__main__':
     for i,d in enumerate(data_graph_set):
         data_graph = os.path.join('./data_set/data/ours_format',d)
         for j,q in enumerate(query_graph_set):
-            if i <= 2 and j > 21:
-                continue
             query_graph = os.path.join('./data_set/query/ours_format','{}.g'.format(q))
             try:
                 if i <= 2:
